@@ -5,66 +5,270 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Çoklu YouTube İzleyici</title>
   <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap');
+
+    :root {
+      --bg: #0a0a0a;
+      --surface: #111;
+      --border: #222;
+      --accent: #ff3c00;
+      --accent2: #ffaa00;
+      --text: #e8e8e8;
+      --muted: #555;
+      --ctrl-bg: rgba(10,10,10,0.92);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
     body {
-      margin: 0;
-      background: #000;
-      color: #fff;
-      font-family: Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
       height: 100vh;
       overflow: hidden;
     }
+
     #controls {
       position: fixed;
-      top: 10px;
-      left: 10px;
+      top: 12px;
+      left: 12px;
+      right: 12px;
       z-index: 100;
-      background: rgba(0,0,0,0.7);
-      padding: 10px;
+      background: var(--ctrl-bg);
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      pointer-events: auto;
+      backdrop-filter: blur(12px);
+    }
+
+    #videoUrl {
+      flex: 1;
+      background: #1a1a1a;
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 7px 12px;
+      font-size: 13px;
+      font-family: 'JetBrains Mono', monospace;
+      border-radius: 5px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    #videoUrl:focus { border-color: var(--accent); }
+    #videoUrl::placeholder { color: var(--muted); }
+
+    .ctrl-btn {
+      background: #1a1a1a;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 7px 14px;
+      font-size: 12px;
+      font-family: 'JetBrains Mono', monospace;
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .ctrl-btn:hover { background: #2a2a2a; border-color: #444; }
+    .ctrl-btn.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+      font-weight: 600;
+    }
+    .ctrl-btn.primary:hover { background: #ff5522; }
+
+    /* Toast bildirimi */
+    #toast {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%) translateY(60px);
+      background: #1a1a1a;
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 10px 20px;
       border-radius: 6px;
-      transition: opacity 0.3s ease;
+      font-size: 13px;
+      font-family: 'JetBrains Mono', monospace;
+      z-index: 999;
+      transition: transform 0.3s ease, opacity 0.3s ease;
+      opacity: 0;
+      pointer-events: none;
     }
-    #controls button, #controls input {
-      margin: 0 5px;
+    #toast.show {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
     }
+    #toast.success { border-color: #00cc66; color: #00cc66; }
+    #toast.error { border-color: var(--accent); color: var(--accent); }
+
+    /* Video sayacı */
+    #video-count {
+      font-size: 11px;
+      color: var(--muted);
+      white-space: nowrap;
+      padding: 0 4px;
+    }
+
     #grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      grid-template-columns: repeat(var(--cols, 3), 1fr);
       gap: 4px;
       height: 100vh;
-      padding: 60px 10px 10px;
+      padding: 66px 4px 4px;
+      overflow: hidden;
       box-sizing: border-box;
+      transition: padding 0.25s;
     }
+    #grid.controls-hidden {
+      padding-top: 4px;
+    }
+
+    .video-item {
+      min-width: 0;
+      min-height: 0;
+    }
+
     .video-item {
       position: relative;
-      background: #111;
-      border: 1px solid #333;
-      border-radius: 4px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 5px;
       overflow: hidden;
-      cursor: move;
+      cursor: default;
+      transition: border-color 0.15s, box-shadow 0.15s;
     }
+    .video-item:hover { border-color: #333; }
     .video-item.dragging {
-      opacity: 0.4;
-      border: 2px dashed #ff9800;
+      opacity: 0.35;
+      border: 2px dashed var(--accent2);
     }
+    .video-item.drag-over {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent);
+    }
+
+    /* Sürükleme kolu — videonun üst şeridinde görünür */
+    .drag-handle {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 28px;
+      cursor: grab;
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      transition: opacity 0.15s;
+      background: linear-gradient(to bottom, rgba(0,0,0,0.55), transparent);
+    }
+    .drag-handle:active { cursor: grabbing; }
+    .video-item:hover .drag-handle { opacity: 1; }
+    .drag-handle { pointer-events: none; }
+    .video-item:hover .drag-handle { pointer-events: auto; }
+    .drag-handle::after {
+      content: '⠿';
+      color: rgba(255,255,255,0.5);
+      font-size: 16px;
+      letter-spacing: 2px;
+      user-select: none;
+    }
+
+    /* Sürükleme sırasında iframe'in mouse event'lerini yutmasını önler */
+    .drag-overlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      z-index: 15;
+      cursor: grabbing;
+    }
+    body.is-dragging .drag-overlay { display: block; }
+
     .close-btn {
       position: absolute;
       top: 6px;
-      right: 8px;
-      background: rgba(0,0,0,0.7);
-      color: #ff5252;
-      border: none;
-      border-radius: 50%;
-      width: 24px;
-      height: 24px;
-      font-size: 16px;
+      right: 6px;
+      background: rgba(0,0,0,0.8);
+      color: var(--accent);
+      border: 1px solid var(--accent);
+      border-radius: 4px;
+      width: 22px;
+      height: 22px;
+      font-size: 14px;
+      line-height: 20px;
+      text-align: center;
       cursor: pointer;
       z-index: 10;
       display: none;
+      transition: all 0.15s;
     }
+    .close-btn:hover { background: var(--accent); color: #fff; }
     .video-item:hover .close-btn { display: block; }
+
+    .fs-btn {
+      position: absolute;
+      top: 6px;
+      right: 34px;
+      background: rgba(0,0,0,0.8);
+      color: rgba(255,255,255,0.7);
+      border: 1px solid #444;
+      border-radius: 4px;
+      width: 22px;
+      height: 22px;
+      font-size: 11px;
+      line-height: 20px;
+      text-align: center;
+      cursor: pointer;
+      z-index: 10;
+      display: none;
+      transition: all 0.15s;
+    }
+    .fs-btn:hover { background: #333; color: #fff; border-color: #666; }
+    .video-item:hover .fs-btn { display: block; }
+
+    /* Tek video tam ekran modu */
+    .video-item.is-fullscreen {
+      position: fixed !important;
+      inset: 0 !important;
+      width: 100vw !important;
+      height: 100vh !important;
+      z-index: 500 !important;
+      border-radius: 0 !important;
+      border: none !important;
+    }
+    .video-item.is-fullscreen .video-wrapper {
+      padding-bottom: 0;
+      height: 100%;
+    }
+    body.has-fullscreen-video #grid > .video-item:not(.is-fullscreen) {
+      visibility: hidden;
+    }
+    /* Tam ekrandayken butonları her zaman göster */
+    .video-item.is-fullscreen .close-btn,
+    .video-item.is-fullscreen .fs-btn { display: block; }
+
+    .video-label {
+      position: absolute;
+      bottom: 6px;
+      left: 8px;
+      background: rgba(0,0,0,0.7);
+      color: var(--muted);
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 3px;
+      z-index: 5;
+      pointer-events: none;
+    }
+
     .video-wrapper {
       position: relative;
-      padding-bottom: 56.25%; /* 16:9 oran */
+      padding-bottom: 56.25%;
       height: 0;
     }
     .video-wrapper > div,
@@ -74,7 +278,22 @@
       width: 100%; height: 100%;
     }
 
-    /* Fullscreen modunda kontroller gizlensin */
+    /* Boş durum */
+    #empty-state {
+      display: none;
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      color: var(--muted);
+      pointer-events: none;
+    }
+    #empty-state.visible { display: block; }
+    #empty-state .big { font-size: 48px; margin-bottom: 12px; }
+    #empty-state p { font-size: 13px; line-height: 1.8; }
+
+    /* Tam ekran */
     :fullscreen #controls,
     :-webkit-full-screen #controls,
     :-moz-full-screen #controls {
@@ -85,211 +304,477 @@
 <body>
 
 <div id="controls">
-  <input type="text" id="videoUrl" placeholder="YouTube link veya ID" style="width:220px; padding:6px;" />
-  <button onclick="addVideo()">Ekle</button>
-  <button onclick="exportVideos()">Videoları Dışa Aktar</button>
+  <input type="text" id="videoUrl" placeholder="YouTube link veya video ID girin..." />
+  <button class="ctrl-btn primary" onclick="addVideo()">+ Ekle</button>
+  <span id="video-count">0 video</span>
+  <button class="ctrl-btn" onclick="exportVideos()" title="Video listeni JSON dosyası olarak kaydet">⬇ Dışa Aktar</button>
+  <button class="ctrl-btn" onclick="document.getElementById('importFile').click()" title="Kaydedilmiş JSON listeni yükle">⬆ İçe Aktar</button>
   <input type="file" id="importFile" accept=".json" style="display:none;" />
-  <button onclick="document.getElementById('importFile').click()">Videoları İçe Aktar</button>
+  <span style="font-size:11px;color:var(--muted);white-space:nowrap;" title="Kontrol çubuğunu gizlemek için F tuşuna bas">[F] gizle</span>
 </div>
 
 <div id="grid"></div>
 
+<div id="empty-state" class="visible">
+  <div class="big">▶</div>
+  <p>Henüz video yok.<br>Yukarıya bir YouTube linki gir ve ekle.<br><br>Daha önce dışa aktardıysan<br><strong>İçe Aktar</strong> ile geri yükleyebilirsin.</p>
+</div>
+
+<div id="toast"></div>
+
 <script src="https://www.youtube.com/iframe_api"></script>
 <script>
-let players = [];
-let currentSoundPlayer = null;
+  let players = [];
+  let currentSoundPlayer = null;
 
-function onYouTubeIframeAPIReady() {
-  loadSavedVideos();
-}
+  // ─── Toast ──────────────────────────────────────────────
+  function showToast(msg, type = 'default', duration = 2800) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = 'show ' + type;
+    clearTimeout(t._timer);
+    t._timer = setTimeout(() => { t.className = ''; }, duration);
+  }
 
-function loadSavedVideos() {
-  const saved = localStorage.getItem('youtubeMultiVideos');
-  if (saved) {
+  // ─── Video sayısı güncelle ───────────────────────────────
+  function updateCount() {
+    const n = document.querySelectorAll('.video-item').length;
+    const el = document.getElementById('video-count');
+    el.textContent = n + ' video';
+    const empty = document.getElementById('empty-state');
+    empty.classList.toggle('visible', n === 0);
+  }
+
+  // ─── YouTube API hazır ───────────────────────────────────
+  function onYouTubeIframeAPIReady() {
+    loadSavedVideos();
+  }
+
+  // ─── localStorage'dan yükle ──────────────────────────────
+  function loadSavedVideos() {
+    const saved = localStorage.getItem('youtubeMultiVideos');
+    if (!saved) return;
     try {
       const ids = JSON.parse(saved);
+      if (!Array.isArray(ids) || ids.length === 0) return;
       ids.forEach((id, index) => {
-        setTimeout(() => addVideoFromId(id), index * 800);
+        if (id && typeof id === 'string' && id.length === 11) {
+          setTimeout(() => addVideoFromId(id, false), index * 700);
+        }
       });
     } catch (e) {
-      console.error('Kaydedilmiş videolar okunamadı:', e);
+      console.error('Kayıt okunamadı:', e);
       localStorage.removeItem('youtubeMultiVideos');
     }
   }
-}
 
-function extractVideoId(url) {
-  const regex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/i;
-  const match = url.match(regex);
-  return match ? match[1] : url.trim();
-}
-
-function addVideo() {
-  const input = document.getElementById('videoUrl');
-  const id = extractVideoId(input.value);
-  if (!id || id.length !== 11) {
-    alert("Geçerli bir YouTube video ID'si veya link girin.");
-    return;
+  // ─── Video ID çıkar ─────────────────────────────────────
+  function extractVideoId(url) {
+    if (!url) return null;
+    url = url.trim();
+    // Zaten 11 karakterli ID ise direkt döndür
+    if (/^[a-zA-Z0-9_-]{11}$/.test(url)) return url;
+    // URL'den çıkar
+    const regex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/i;
+    const match = url.match(regex);
+    return match ? match[1] : null;
   }
-  input.value = '';
-  addVideoFromId(id);
-}
 
-function addVideoFromId(id) {
-  const grid = document.getElementById('grid');
-  const item = document.createElement('div');
-  item.className = 'video-item';
-  item.draggable = true;
-  item.dataset.videoId = id;
+  // ─── Input'tan video ekle ────────────────────────────────
+  function addVideo() {
+    const input = document.getElementById('videoUrl');
+    const id = extractVideoId(input.value);
+    if (!id) {
+      showToast('Geçerli bir YouTube linki veya ID girin.', 'error');
+      return;
+    }
+    // Aynı video zaten ekli mi kontrol et
+    const existing = [...document.querySelectorAll('.video-item')].map(i => i.dataset.videoId);
+    if (existing.includes(id)) {
+      showToast('Bu video zaten eklenmiş.', 'error');
+      return;
+    }
+    input.value = '';
+    addVideoFromId(id, true);
+  }
 
-  const wrapper = document.createElement('div');
-  wrapper.className = 'video-wrapper';
+  // ─── ID ile video ekle ───────────────────────────────────
+  function addVideoFromId(id, save = true) {
+    const grid = document.getElementById('grid');
+    const item = document.createElement('div');
+    item.className = 'video-item';
+    item.draggable = true;
+    item.dataset.videoId = id;
+    item.id = 'vid-' + id + '-' + Date.now();
 
-  const playerDiv = document.createElement('div');
-  playerDiv.id = 'yt-' + Date.now();
+    const wrapper = document.createElement('div');
+    wrapper.className = 'video-wrapper';
 
-  wrapper.appendChild(playerDiv);
-  item.appendChild(wrapper);
+    const playerDivId = 'yt-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7);
+    const playerDiv = document.createElement('div');
+    playerDiv.id = playerDivId;
 
-  const closeBtn = document.createElement('button');
-  closeBtn.className = 'close-btn';
-  closeBtn.textContent = '×';
-  closeBtn.onclick = () => {
-    const idx = players.findIndex(p => p.getIframe() && p.getIframe().parentNode === wrapper);
+    wrapper.appendChild(playerDiv);
+    item.appendChild(wrapper);
+
+    // Sürükleme overlay (iframe mouse yutmasın diye)
+    const dragOverlay = document.createElement('div');
+    dragOverlay.className = 'drag-overlay';
+    item.appendChild(dragOverlay);
+
+    // Sürükleme kolu
+    const dragHandle = document.createElement('div');
+    dragHandle.className = 'drag-handle';
+    dragHandle.title = 'Sürükleyerek taşı';
+    item.appendChild(dragHandle);
+
+    // Kapatma butonu
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'close-btn';
+    closeBtn.textContent = '×';
+    closeBtn.title = 'Videoyu kaldır';
+    closeBtn.onclick = (e) => {
+      e.stopPropagation();
+      if (item.classList.contains('is-fullscreen')) exitVideoFullscreen(item, fsBtn);
+      removeVideoItem(item, id);
+    };
+    item.appendChild(closeBtn);
+
+    // Tam ekran butonu
+    const fsBtn = document.createElement('button');
+    fsBtn.className = 'fs-btn';
+    fsBtn.textContent = '⛶';
+    fsBtn.title = 'Tam ekran';
+    fsBtn.onclick = (e) => {
+      e.stopPropagation();
+      toggleVideoFullscreen(item, fsBtn);
+    };
+    item.appendChild(fsBtn);
+
+    // Video ID etiketi
+    const label = document.createElement('span');
+    label.className = 'video-label';
+    label.textContent = id;
+    item.appendChild(label);
+
+    grid.appendChild(item);
+
+    // ─── Drag & Drop ─────────────────────────────────────
+    // Sadece handle üzerinden sürüklemeye izin ver
+    item.draggable = false;
+    dragHandle.addEventListener('mousedown', () => { item.draggable = true; });
+    document.addEventListener('mouseup', () => { item.draggable = false; }, { capture: true });
+
+    item.addEventListener('dragstart', e => {
+      if (!item.draggable) { e.preventDefault(); return; }
+      item.classList.add('dragging');
+      document.body.classList.add('is-dragging');
+      e.dataTransfer.setData('text/plain', item.id);
+      e.dataTransfer.effectAllowed = 'move';
+    });
+
+    item.addEventListener('dragend', () => {
+      item.draggable = false;
+      item.classList.remove('dragging');
+      document.body.classList.remove('is-dragging');
+      document.querySelectorAll('.video-item').forEach(i => i.classList.remove('drag-over'));
+      saveVideoIds();
+    });
+
+    item.addEventListener('dragover', e => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      document.querySelectorAll('.video-item').forEach(i => i.classList.remove('drag-over'));
+      item.classList.add('drag-over');
+    });
+
+    item.addEventListener('dragleave', () => {
+      item.classList.remove('drag-over');
+    });
+
+    item.addEventListener('drop', e => {
+      e.preventDefault();
+      item.classList.remove('drag-over');
+      const draggedId = e.dataTransfer.getData('text/plain');
+      const dragged = document.getElementById(draggedId);
+      if (!dragged || dragged === item) return;
+      const rect = item.getBoundingClientRect();
+      const midY = rect.top + rect.height / 2;
+      if (e.clientY < midY) {
+        grid.insertBefore(dragged, item);
+      } else {
+        grid.insertBefore(dragged, item.nextSibling);
+      }
+      saveVideoIds();
+    });
+
+    // ─── YouTube Player ───────────────────────────────────
+    const player = new YT.Player(playerDivId, {
+      height: '100%',
+      width: '100%',
+      videoId: id,
+      playerVars: {
+        autoplay: 1,
+        mute: 1,
+        controls: 1,
+        modestbranding: 1,
+        rel: 0,
+        iv_load_policy: 3,
+        enablejsapi: 1
+      },
+      events: {
+        onReady: event => {
+          event.target.mute();
+          item.addEventListener('click', () => {
+            if (currentSoundPlayer && currentSoundPlayer !== player) {
+              try { currentSoundPlayer.mute(); } catch(e) {}
+            }
+            try { player.unMute(); } catch(e) {}
+            currentSoundPlayer = player;
+          });
+        },
+        onError: () => {
+          label.textContent = id + ' ⚠';
+          label.style.color = 'var(--accent)';
+        }
+      }
+    });
+
+    players.push({ player, id, itemId: item.id });
+    if (save) saveVideoIds();
+    updateCount();
+    updateGrid();
+  }
+
+  // ─── Video kaldır ────────────────────────────────────────
+  function removeVideoItem(item, id) {
+    const idx = players.findIndex(p => p.itemId === item.id);
     if (idx > -1) {
-      players[idx].destroy();
+      try { players[idx].player.destroy(); } catch(e) {}
       players.splice(idx, 1);
+    }
+    if (currentSoundPlayer) {
+      const activeIdx = players.findIndex(p => p.player === currentSoundPlayer);
+      if (activeIdx === -1) currentSoundPlayer = null;
     }
     item.remove();
     saveVideoIds();
-  };
-  item.appendChild(closeBtn);
-
-  grid.appendChild(item);
-
-  // Drag olayları
-  item.addEventListener('dragstart', e => {
-    item.classList.add('dragging');
-    e.dataTransfer.setData('text/plain', item.id = item.id || 'vid-' + Date.now());
-  });
-
-  item.addEventListener('dragend', () => {
-    item.classList.remove('dragging');
-    saveVideoIds();
-  });
-
-  grid.addEventListener('dragover', e => e.preventDefault());
-
-  grid.addEventListener('drop', e => {
-    e.preventDefault();
-    const draggedId = e.dataTransfer.getData('text/plain');
-    const dragged = document.getElementById(draggedId);
-    if (!dragged) return;
-    const target = e.target.closest('.video-item');
-    if (target && target !== dragged) {
-      if (e.offsetY < target.offsetHeight / 2) {
-        grid.insertBefore(dragged, target);
-      } else {
-        grid.insertBefore(dragged, target.nextSibling);
-      }
-      saveVideoIds();
-    }
-  });
-
-  const player = new YT.Player(playerDiv.id, {
-    height: '100%',
-    width: '100%',
-    videoId: id,
-    playerVars: {
-      autoplay: 1,
-      mute: 1,
-      controls: 0,
-      modestbranding: 1,
-      rel: 0,
-      iv_load_policy: 3,
-      fs: 0,
-      disablekb: 1,
-      enablejsapi: 1
-    },
-    events: {
-      onReady: event => {
-        item.addEventListener('click', () => {
-          if (currentSoundPlayer && currentSoundPlayer !== player) {
-            currentSoundPlayer.mute();
-          }
-          player.unMute();
-          currentSoundPlayer = player;
-        });
-      }
-    }
-  });
-
-  players.push(player);
-  saveVideoIds();
-}
-
-function saveVideoIds() {
-  const currentIds = [];
-  document.querySelectorAll('.video-item').forEach(item => {
-    if (item.dataset.videoId) {
-      currentIds.push(item.dataset.videoId);
-    }
-  });
-  localStorage.setItem('youtubeMultiVideos', JSON.stringify(currentIds));
-}
-
-// Dışa Aktar
-function exportVideos() {
-  const saved = localStorage.getItem('youtubeMultiVideos');
-  if (!saved || saved === '[]') {
-    alert('Kaydedilmiş video yok.');
-    return;
+    updateCount();
+    updateGrid();
   }
-  const blob = new Blob([`{"youtubeMultiVideos": ${saved}}`], {type: 'application/json'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'youtube-videolarim.json';
-  a.click();
-  URL.revokeObjectURL(url);
-}
 
-// İçe Aktar
-function importVideos(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = function(e) {
+  // ─── localStorage'a kaydet ───────────────────────────────
+  function saveVideoIds() {
+    const ids = [...document.querySelectorAll('.video-item')]
+      .map(i => i.dataset.videoId)
+      .filter(Boolean);
     try {
-      const data = JSON.parse(e.target.result);
-      if (data.youtubeMultiVideos) {
-        localStorage.setItem('youtubeMultiVideos', data.youtubeMultiVideos);
-        alert('Videolar yüklendi! Sayfa yenileniyor...');
-        location.reload();
-      } else {
-        alert('Geçersiz dosya formatı. Doğru JSON dosyası seçin.');
-      }
-    } catch (err) {
-      alert('Dosya okunamadı: ' + err.message);
+      localStorage.setItem('youtubeMultiVideos', JSON.stringify(ids));
+    } catch(e) {
+      console.error('Kayıt hatası:', e);
     }
-  };
-  reader.readAsText(file);
-}
-
-document.getElementById('videoUrl').addEventListener('keypress', e => {
-  if (e.key === 'Enter') addVideo();
-});
-
-// İçe aktar dosya seçimi olayı
-document.getElementById('importFile').addEventListener('change', importVideos);
-
-// Fullscreen değişikliğinde kontroller gizle
-document.addEventListener('fullscreenchange', () => {
-  const controls = document.getElementById('controls');
-  if (controls) {
-    controls.style.display = document.fullscreenElement ? 'none' : 'block';
   }
-});
+
+  // ─── DIŞA AKTAR ─────────────────────────────────────────
+  function exportVideos() {
+    const ids = [...document.querySelectorAll('.video-item')]
+      .map(i => i.dataset.videoId)
+      .filter(Boolean);
+
+    if (ids.length === 0) {
+      showToast('Dışa aktarılacak video yok.', 'error');
+      return;
+    }
+
+    // Sade, okunabilir format
+    const exportData = {
+      version: 1,
+      exportDate: new Date().toISOString(),
+      videoCount: ids.length,
+      videoIds: ids
+    };
+
+    const json = JSON.stringify(exportData, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'youtube-videolarim-' + new Date().toISOString().slice(0,10) + '.json';
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('✓ ' + ids.length + ' video dışa aktarıldı.', 'success');
+  }
+
+  // ─── İÇE AKTAR ──────────────────────────────────────────
+  function importVideos(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    // Input'u sıfırla (aynı dosyayı tekrar seçebilmek için)
+    event.target.value = '';
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      try {
+        const data = JSON.parse(e.target.result);
+
+        let ids = null;
+
+        // Yeni format: { version, videoIds: [...] }
+        if (data.videoIds && Array.isArray(data.videoIds)) {
+          ids = data.videoIds;
+        }
+        // Eski format: { youtubeMultiVideos: [...] }
+        else if (data.youtubeMultiVideos && Array.isArray(data.youtubeMultiVideos)) {
+          ids = data.youtubeMultiVideos;
+        }
+        // Direkt array: [...]
+        else if (Array.isArray(data)) {
+          ids = data;
+        }
+
+        if (!ids || ids.length === 0) {
+          showToast('Dosyada geçerli video bulunamadı.', 'error');
+          return;
+        }
+
+        // Geçerli ID'leri filtrele
+        const validIds = ids.filter(id => typeof id === 'string' && id.length === 11);
+        if (validIds.length === 0) {
+          showToast('Geçerli video ID\'si bulunamadı.', 'error');
+          return;
+        }
+
+        // Mevcut tüm videoları temizle
+        clearAllVideos();
+
+        // localStorage'ı güncelle
+        localStorage.setItem('youtubeMultiVideos', JSON.stringify(validIds));
+
+        // Videoları yükle
+        validIds.forEach((id, index) => {
+          setTimeout(() => addVideoFromId(id, false), index * 700);
+        });
+
+        showToast('✓ ' + validIds.length + ' video yüklendi.', 'success');
+
+      } catch (err) {
+        showToast('Dosya okunamadı: ' + err.message, 'error', 4000);
+        console.error('Import hatası:', err);
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  // ─── Tümünü temizle ─────────────────────────────────────
+  function clearAllVideos() {
+    players.forEach(p => {
+      try { p.player.destroy(); } catch(e) {}
+    });
+    players = [];
+    currentSoundPlayer = null;
+    document.getElementById('grid').innerHTML = '';
+    updateCount();
+  }
+
+  // ─── Dinamik kolon hesapla ───────────────────────────────
+  function updateGrid() {
+    const grid = document.getElementById('grid');
+    const w = window.innerWidth;
+    const count = document.querySelectorAll('.video-item').length;
+    if (count === 0) return;
+
+    // Pencere genişliğine göre maksimum kaç kolon sığar (min 240px/video)
+    const maxColsByWidth = Math.max(1, Math.floor(w / 240));
+    // Video sayısından fazla kolon olmasın
+    const cols = Math.min(count, maxColsByWidth);
+
+    grid.style.setProperty('--cols', cols);
+
+    // Satır sayısına göre video yüksekliklerini ayarla
+    const rows = Math.ceil(count / cols);
+    const availableH = window.innerHeight - (controlsHidden ? 8 : 70);
+    const rowH = Math.floor(availableH / rows);
+    grid.style.gridTemplateRows = `repeat(${rows}, ${rowH}px)`;
+  }
+
+  window.addEventListener('resize', updateGrid);
+  document.getElementById('videoUrl').addEventListener('keydown', e => {
+    if (e.key === 'Enter') addVideo();
+  });
+
+  // ─── F tuşu: kontrol çubuğunu gizle/göster ──────────────
+  let controlsHidden = false;
+  document.addEventListener('keydown', e => {
+    // Input odaklanmışsa F tuşunu engelleme
+    if (document.activeElement === document.getElementById('videoUrl')) return;
+    if (e.key === 'f' || e.key === 'F') {
+      controlsHidden = !controlsHidden;
+      const ctrl = document.getElementById('controls');
+      ctrl.style.transition = 'opacity 0.25s, transform 0.25s';
+      ctrl.style.opacity = controlsHidden ? '0' : '1';
+      ctrl.style.transform = controlsHidden ? 'translateY(-60px)' : 'translateY(0)';
+      ctrl.style.pointerEvents = controlsHidden ? 'none' : 'auto';
+      document.getElementById('grid').classList.toggle('controls-hidden', controlsHidden);
+      updateGrid();
+    }
+  });
+
+  // ─── Tek video tam ekran ─────────────────────────────────
+  let fullscreenItem = null;
+
+  function toggleVideoFullscreen(item, btn) {
+    if (item.classList.contains('is-fullscreen')) {
+      exitVideoFullscreen(item, btn);
+    } else {
+      enterVideoFullscreen(item, btn);
+    }
+  }
+
+  function enterVideoFullscreen(item, btn) {
+    if (fullscreenItem) exitVideoFullscreen(fullscreenItem, fullscreenItem.querySelector('.fs-btn'));
+    fullscreenItem = item;
+    item.classList.add('is-fullscreen');
+    document.body.classList.add('has-fullscreen-video');
+    btn.textContent = '✕';
+    btn.title = 'Tam ekrandan çık (ESC)';
+    // Kontrolleri gizle
+    const ctrl = document.getElementById('controls');
+    ctrl.style.opacity = '0';
+    ctrl.style.pointerEvents = 'none';
+  }
+
+  function exitVideoFullscreen(item, btn) {
+    item.classList.remove('is-fullscreen');
+    document.body.classList.remove('has-fullscreen-video');
+    if (btn) { btn.textContent = '⛶'; btn.title = 'Tam ekran'; }
+    fullscreenItem = null;
+    // Kontrolleri geri getir (sadece controlsHidden kapalıysa)
+    if (!controlsHidden) {
+      const ctrl = document.getElementById('controls');
+      ctrl.style.opacity = '1';
+      ctrl.style.pointerEvents = 'auto';
+    }
+  }
+
+  // ESC tuşu ile tam ekrandan çık
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && fullscreenItem) {
+      exitVideoFullscreen(fullscreenItem, fullscreenItem.querySelector('.fs-btn'));
+    }
+  });
+
+  document.getElementById('importFile').addEventListener('change', importVideos);
+
+  // ─── Tarayıcı tam ekran değişimi ─────────────────────────
+  function handleFullscreenChange() {
+    const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreen);
+    const ctrl = document.getElementById('controls');
+    ctrl.style.display = isFs ? 'none' : 'flex';
+  }
+  document.addEventListener('fullscreenchange', handleFullscreenChange);
+  document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+  document.addEventListener('mozfullscreenchange', handleFullscreenChange);
 </script>
 
 </body>
