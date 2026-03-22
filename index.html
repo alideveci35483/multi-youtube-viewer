@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Çoklu YouTube İzleyici</title>
+  <style>
+    body {
+      margin: 0;
+      background: #000;
+      color: #fff;
+      font-family: Arial, sans-serif;
+      height: 100vh;
+      overflow: hidden;
+    }
+    #controls {
+      position: fixed;
+      top: 10px;
+      left: 10px;
+      z-index: 100;
+      background: rgba(0,0,0,0.7);
+      padding: 10px;
+      border-radius: 6px;
+      transition: opacity 0.3s ease;
+    }
+    #controls button, #controls input {
+      margin: 0 5px;
+    }
+    #grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 4px;
+      height: 100vh;
+      padding: 60px 10px 10px;
+      box-sizing: border-box;
+    }
+    .video-item {
+      position: relative;
+      background: #111;
+      border: 1px solid #333;
+      border-radius: 4px;
+      overflow: hidden;
+      cursor: move;
+    }
+    .video-item.dragging {
+      opacity: 0.4;
+      border: 2px dashed #ff9800;
+    }
+    .close-btn {
+      position: absolute;
+      top: 6px;
+      right: 8px;
+      background: rgba(0,0,0,0.7);
+      color: #ff5252;
+      border: none;
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      font-size: 16px;
+      cursor: pointer;
+      z-index: 10;
+      display: none;
+    }
+    .video-item:hover .close-btn { display: block; }
+    .video-wrapper {
+      position: relative;
+      padding-bottom: 56.25%; /* 16:9 oran */
+      height: 0;
+    }
+    .video-wrapper > div,
+    .video-wrapper iframe {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+    }
+
+    /* Fullscreen modunda kontroller gizlensin */
+    :fullscreen #controls,
+    :-webkit-full-screen #controls,
+    :-moz-full-screen #controls {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+
+<div id="controls">
+  <input type="text" id="videoUrl" placeholder="YouTube link veya ID" style="width:220px; padding:6px;" />
+  <button onclick="addVideo()">Ekle</button>
+  <button onclick="exportVideos()">Videoları Dışa Aktar</button>
+  <input type="file" id="importFile" accept=".json" style="display:none;" />
+  <button onclick="document.getElementById('importFile').click()">Videoları İçe Aktar</button>
+</div>
+
+<div id="grid"></div>
+
+<script src="https://www.youtube.com/iframe_api"></script>
+<script>
+let players = [];
+let currentSoundPlayer = null;
+
+function onYouTubeIframeAPIReady() {
+  loadSavedVideos();
+}
+
+function loadSavedVideos() {
+  const saved = localStorage.getItem('youtubeMultiVideos');
+  if (saved) {
+    try {
+      const ids = JSON.parse(saved);
+      ids.forEach((id, index) => {
+        setTimeout(() => addVideoFromId(id), index * 800);
+      });
+    } catch (e) {
+      console.error('Kaydedilmiş videolar okunamadı:', e);
+      localStorage.removeItem('youtubeMultiVideos');
+    }
+  }
+}
+
+function extractVideoId(url) {
+  const regex = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/i;
+  const match = url.match(regex);
+  return match ? match[1] : url.trim();
+}
+
+function addVideo() {
+  const input = document.getElementById('videoUrl');
+  const id = extractVideoId(input.value);
+  if (!id || id.length !== 11) {
+    alert("Geçerli bir YouTube video ID'si veya link girin.");
+    return;
+  }
+  input.value = '';
+  addVideoFromId(id);
+}
+
+function addVideoFromId(id) {
+  const grid = document.getElementById('grid');
+  const item = document.createElement('div');
+  item.className = 'video-item';
+  item.draggable = true;
+  item.dataset.videoId = id;
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'video-wrapper';
+
+  const playerDiv = document.createElement('div');
+  playerDiv.id = 'yt-' + Date.now();
+
+  wrapper.appendChild(playerDiv);
+  item.appendChild(wrapper);
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'close-btn';
+  closeBtn.textContent = '×';
+  closeBtn.onclick = () => {
+    const idx = players.findIndex(p => p.getIframe() && p.getIframe().parentNode === wrapper);
+    if (idx > -1) {
+      players[idx].destroy();
+      players.splice(idx, 1);
+    }
+    item.remove();
+    saveVideoIds();
+  };
+  item.appendChild(closeBtn);
+
+  grid.appendChild(item);
+
+  // Drag olayları
+  item.addEventListener('dragstart', e => {
+    item.classList.add('dragging');
+    e.dataTransfer.setData('text/plain', item.id = item.id || 'vid-' + Date.now());
+  });
+
+  item.addEventListener('dragend', () => {
+    item.classList.remove('dragging');
+    saveVideoIds();
+  });
+
+  grid.addEventListener('dragover', e => e.preventDefault());
+
+  grid.addEventListener('drop', e => {
+    e.preventDefault();
+    const draggedId = e.dataTransfer.getData('text/plain');
+    const dragged = document.getElementById(draggedId);
+    if (!dragged) return;
+    const target = e.target.closest('.video-item');
+    if (target && target !== dragged) {
+      if (e.offsetY < target.offsetHeight / 2) {
+        grid.insertBefore(dragged, target);
+      } else {
+        grid.insertBefore(dragged, target.nextSibling);
+      }
+      saveVideoIds();
+    }
+  });
+
+  const player = new YT.Player(playerDiv.id, {
+    height: '100%',
+    width: '100%',
+    videoId: id,
+    playerVars: {
+      autoplay: 1,
+      mute: 1,
+      controls: 0,
+      modestbranding: 1,
+      rel: 0,
+      iv_load_policy: 3,
+      fs: 0,
+      disablekb: 1,
+      enablejsapi: 1
+    },
+    events: {
+      onReady: event => {
+        item.addEventListener('click', () => {
+          if (currentSoundPlayer && currentSoundPlayer !== player) {
+            currentSoundPlayer.mute();
+          }
+          player.unMute();
+          currentSoundPlayer = player;
+        });
+      }
+    }
+  });
+
+  players.push(player);
+  saveVideoIds();
+}
+
+function saveVideoIds() {
+  const currentIds = [];
+  document.querySelectorAll('.video-item').forEach(item => {
+    if (item.dataset.videoId) {
+      currentIds.push(item.dataset.videoId);
+    }
+  });
+  localStorage.setItem('youtubeMultiVideos', JSON.stringify(currentIds));
+}
+
+// Dışa Aktar
+function exportVideos() {
+  const saved = localStorage.getItem('youtubeMultiVideos');
+  if (!saved || saved === '[]') {
+    alert('Kaydedilmiş video yok.');
+    return;
+  }
+  const blob = new Blob([`{"youtubeMultiVideos": ${saved}}`], {type: 'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'youtube-videolarim.json';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// İçe Aktar
+function importVideos(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const data = JSON.parse(e.target.result);
+      if (data.youtubeMultiVideos) {
+        localStorage.setItem('youtubeMultiVideos', data.youtubeMultiVideos);
+        alert('Videolar yüklendi! Sayfa yenileniyor...');
+        location.reload();
+      } else {
+        alert('Geçersiz dosya formatı. Doğru JSON dosyası seçin.');
+      }
+    } catch (err) {
+      alert('Dosya okunamadı: ' + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
+document.getElementById('videoUrl').addEventListener('keypress', e => {
+  if (e.key === 'Enter') addVideo();
+});
+
+// İçe aktar dosya seçimi olayı
+document.getElementById('importFile').addEventListener('change', importVideos);
+
+// Fullscreen değişikliğinde kontroller gizle
+document.addEventListener('fullscreenchange', () => {
+  const controls = document.getElementById('controls');
+  if (controls) {
+    controls.style.display = document.fullscreenElement ? 'none' : 'block';
+  }
+});
+</script>
+
+</body>
+</html>
